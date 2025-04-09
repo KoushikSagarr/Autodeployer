@@ -21,60 +21,66 @@ pipeline {
         stage('Run App') {
             steps {
                 bat '''
-                    REM Kill any process using port 3000 (if already running)
-                    FOR /F "tokens=5" %%a IN ('netstat -ano ^| findstr :3000') DO taskkill /F /PID %%a
+                    REM Kill any process using port 3001 (if already running)
+                    FOR /F "tokens=5" %%a IN ('netstat -ano ^| findstr :3001') DO taskkill /F /PID %%a
 
-                    REM Start app in background
-                    start /b cmd /c "node app\\index.js"
+                    REM Start the app on port 3001 in the background
+                    start /b cmd /c "set PORT=3001 && node app\\index.js"
 
-                    REM Wait a few seconds for app to boot up
-                    timeout /t 2 >nul
+                    REM Wait a few seconds for the app to boot up
+                    ping 127.0.0.1 -n 5 >nul
 
-                    REM Get PID of node process and save to app.pid
+                    REM Get the PID of the node process and save it
                     for /f "tokens=2" %%i in ('wmic process where "name=\'node.exe\'" get ProcessId ^| findstr [0-9]') do (
                         echo %%i > app.pid
                         goto done
                     )
                     :done
                 '''
-                sleep time: 5, unit: 'SECONDS'
             }
         }
 
         stage('Run Health Test') {
             steps {
-                bat 'test\\health-test.bat'
+                bat 'curl --fail http://localhost:3001/health || exit /b 1'
             }
         }
 
         stage('Stop App') {
             steps {
                 bat '''
-                    REM Stop app using PID from app.pid
-                    for /F %%i in (app.pid) do taskkill /PID %%i /F
+                    if exist app.pid (
+                        set /p PID=<app.pid
+                        taskkill /F /PID %PID%
+                        del app.pid
+                    )
                 '''
             }
         }
 
         stage('Docker Build') {
             steps {
-                bat 'docker build -t autodeployer:latest .'
+                bat 'docker build -t autodeployer-app .'
             }
         }
 
         stage('Mock Deploy') {
             steps {
-                echo 'Mock deployment stage - this is where real deployment would happen.'
+                echo 'Simulating deployment...'
+                bat 'echo "Deploying to mock environment..."'
             }
         }
     }
 
     post {
+        success {
+            echo 'Pipeline completed successfully.'
+        }
         failure {
             echo 'Pipeline failed! Check logs above.'
         }
-        success {
-            echo 'Pipeline completed successfully!'
+        always {
+            echo 'Cleaning up...'
         }
     }
 }
