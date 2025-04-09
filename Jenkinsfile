@@ -15,9 +15,8 @@ pipeline {
         stage('Run App') {
             steps {
                 bat '''
-                start /b node app\\index.js > output.log 2>&1
-                timeout /t 1 > nul
-                for /f "tokens=2 delims==; " %%i in ('tasklist /FI "IMAGENAME eq node.exe" /FO LIST ^| findstr PID') do echo %%i > app.pid
+                    start /b node app\\index.js > output.log 2>&1
+                    for /f "tokens=2 delims==; " %%i in ('tasklist /FI "IMAGENAME eq node.exe" /FO LIST ^| findstr PID') do echo %%i > app.pid
                 '''
                 sleep time: 5, unit: 'SECONDS'
             }
@@ -32,7 +31,7 @@ pipeline {
         stage('Stop App') {
             steps {
                 bat '''
-                for /F %%i in (app.pid) do taskkill /PID %%i /F
+                    for /F %%i in (app.pid) do taskkill /PID %%i /F
                 '''
             }
         }
