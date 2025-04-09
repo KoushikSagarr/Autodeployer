@@ -15,8 +15,13 @@ pipeline {
         stage('Run App') {
             steps {
                 bat '''
-                    start /b node app\\index.js > output.log 2>&1
-                    for /f "tokens=2 delims==; " %%i in ('tasklist /FI "IMAGENAME eq node.exe" /FO LIST ^| findstr PID') do echo %%i > app.pid
+                    start /b cmd /c "node app\\index.js" 
+                    timeout /t 2 >nul
+                    for /f "tokens=2" %%i in ('wmic process where "name='node.exe'" get ProcessId ^| findstr [0-9]') do (
+                        echo %%i > app.pid
+                        goto done
+                    )
+                    :done
                 '''
                 sleep time: 5, unit: 'SECONDS'
             }
