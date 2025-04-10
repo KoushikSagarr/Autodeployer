@@ -24,15 +24,25 @@ const io = new Server(server, {
 app.use(cors());
 app.use(express.json());
 
-// Jenkins config
 const JENKINS_BASE = process.env.JENKINS_BASE;
 const JENKINS_USER = process.env.JENKINS_USER;
 const JENKINS_TOKEN = process.env.JENKINS_TOKEN;
 const JOB_NAME = process.env.JOB_NAME || "YourJobName";
+const USE_TOKEN_TRIGGER = process.env.USE_TOKEN_TRIGGER === "true"; // Optional toggle
 
-const headers = {
-  Authorization: "Basic " + Buffer.from(`${JENKINS_USER}:${JENKINS_TOKEN}`).toString("base64")
-};
+const authHeader = "Basic " + Buffer.from(`${JENKINS_USER}:${JENKINS_TOKEN}`).toString("base64");
+
+// Fetch CSRF crumb
+async function getCrumb() {
+  const response = await fetch(`${JENKINS_BASE}/crumbIssuer/api/json`, {
+    headers: { Authorization: authHeader }
+  });
+
+  if (!response.ok) throw new Error("Failed to fetch CSRF crumb");
+
+  const data = await response.json();
+  return { [data.crumbRequestField]: data.crumb };
+}
 
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" });
@@ -40,18 +50,23 @@ app.get("/health", (req, res) => {
 
 app.post("/trigger-build", async (req, res) => {
   try {
-    const triggerURL = `${JENKINS_BASE}/job/${JOB_NAME}/build`;
-    const response = await fetch(triggerURL, {
-      method: "POST",
-      headers
-    });
+    let triggerURL = `${JENKINS_BASE}/job/${JOB_NAME}/build`;
+    const headers = { Authorization: authHeader };
+
+    if (USE_TOKEN_TRIGGER) {
+      triggerURL += `?token=${JENKINS_TOKEN}`;
+    } else {
+      const crumb = await getCrumb();
+      Object.assign(headers, crumb);
+    }
+
+    const response = await fetch(triggerURL, { method: "POST", headers });
 
     if (response.status === 201 || response.status === 200) {
-      const now = new Date().toISOString();
       io.emit("status", {
         type: "info",
         message: `Build triggered for job '${JOB_NAME}'`,
-        time: now
+        time: new Date().toISOString()
       });
       res.json({ message: "Build triggered successfully." });
     } else {
@@ -72,7 +87,7 @@ app.get("/build-history", async (req, res) => {
   try {
     const response = await fetch(
       `${JENKINS_BASE}/job/${JOB_NAME}/api/json?tree=builds[number,result,timestamp,duration]`,
-      { headers }
+      { headers: { Authorization: authHeader } }
     );
     const data = await response.json();
     const builds = data.builds.map(build => ({
@@ -88,20 +103,20 @@ app.get("/build-history", async (req, res) => {
   }
 });
 
-// Real-time external status emitter
 app.post("/status", (req, res) => {
   const { type, message, time } = req.body;
   io.emit("status", { type, message, time });
   res.sendStatus(200);
 });
 
-// 🔥 Stream live console logs
 app.get("/logs/:buildNumber", async (req, res) => {
   const { buildNumber } = req.params;
   const url = `${JENKINS_BASE}/job/${JOB_NAME}/${buildNumber}/logText/progressiveText?start=0`;
 
   try {
-    const response = await fetch(url, { headers });
+    const response = await fetch(url, {
+      headers: { Authorization: authHeader }
+    });
     if (!response.ok) throw new Error(`Jenkins responded with ${response.status}`);
     const text = await response.text();
     res.send(text);
@@ -111,40 +126,47 @@ app.get("/logs/:buildNumber", async (req, res) => {
   }
 });
 
-// Serve UI
 app.use(express.static(path.join(__dirname, "../public")));
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "../public/index.html"));
 });
 
-// WebSocket stream pipe
 io.on("connection", socket => {
   console.log("Client connected:", socket.id);
 
   socket.on("watch-log", async buildNumber => {
     try {
       let start = 0;
-      const interval = setInterval(async () => {
+
+      const streamLogs = async () => {
         const logURL = `${JENKINS_BASE}/job/${JOB_NAME}/${buildNumber}/logText/progressiveText?start=${start}`;
-        const response = await fetch(logURL, { headers });
+        try {
+          const response = await fetch(logURL, {
+            headers: { Authorization: authHeader }
+          });
 
-        const text = await response.text();
-        const moreData = response.headers.get("X-More-Data");
-        const nextStart = parseInt(response.headers.get("X-Text-Size") || "0", 10);
+          if (!response.ok) throw new Error(`Log fetch failed: ${response.status}`);
+          const text = await response.text();
 
-        if (text) {
-          socket.emit("log-update", text);
+          const moreData = response.headers.get("X-More-Data");
+          const nextStart = parseInt(response.headers.get("X-Text-Size") || "0", 10);
+
+          if (text) socket.emit("log-update", text);
+          start = nextStart;
+
+          if (moreData === "true") {
+            setTimeout(streamLogs, 1500);
+          } else {
+            socket.emit("log-done", buildNumber);
+          }
+        } catch (err) {
+          console.error("Error while streaming logs:", err.message);
         }
+      };
 
-        start = nextStart;
-
-        if (moreData !== "true") {
-          clearInterval(interval);
-          socket.emit("log-done", buildNumber);
-        }
-      }, 1500);
+      streamLogs();
     } catch (e) {
-      console.error("Streaming error:", e);
+      console.error("Streaming error:", e.message);
     }
   });
 
