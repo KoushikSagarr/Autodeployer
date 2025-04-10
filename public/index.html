@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Auto Deployer Dashboard</title>
+  <link rel="stylesheet" href="/styles.css"/>
+  <style>
+    #logModal {
+      display: none;
+      position: fixed;
+      top: 10%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 90%;
+      max-width: 800px;
+      background: #111;
+      color: #0f0;
+      padding: 1rem;
+      border: 2px solid #333;
+      border-radius: 8px;
+      font-family: monospace;
+      max-height: 70vh;
+      overflow-y: auto;
+      z-index: 1000;
+    }
+    #logClose {
+      background: #222;
+      color: #fff;
+      border: none;
+      float: right;
+      margin-bottom: 0.5rem;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 Auto Deployment Dashboard</h1>
+
+    <button id="triggerBuild">Trigger Jenkins Build</button>
+
+    <section class="status-section">
+      <h2>Status Updates</h2>
+      <ul id="statusList"></ul>
+    </section>
+
+    <section class="history-section">
+      <h2>Build History (Click to view logs)</h2>
+      <table id="buildTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Result</th>
+            <th>Duration</th>
+            <th>Timestamp</th>
+          </tr>
+        </thead>
+        <tbody id="buildBody">
+          <tr><td colspan="4">Loading...</td></tr>
+        </tbody>
+      </table>
+    </section>
+  </div>
+
+  <!-- Live log viewer -->
+  <div id="logModal">
+    <button id="logClose">Close</button>
+    <pre id="logContent">Loading log...</pre>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    const socket = io();
+    const triggerBuild = document.getElementById("triggerBuild");
+    const statusList = document.getElementById("statusList");
+    const buildBody = document.getElementById("buildBody");
+    const logModal = document.getElementById("logModal");
+    const logContent = document.getElementById("logContent");
+    const logClose = document.getElementById("logClose");
+
+    // Live status messages
+    socket.on("status", ({ type, message, time }) => {
+      const li = document.createElement("li");
+      li.textContent = `[${new Date(time).toLocaleTimeString()}] ${type.toUpperCase()}: ${message}`;
+      li.className = type;
+      statusList.prepend(li);
+    });
+
+    // Live build log updates
+    socket.on("log-update", log => {
+      logContent.textContent += log;
+      logContent.scrollTop = logContent.scrollHeight;
+    });
+
+    socket.on("log-done", () => {
+      logContent.textContent += "\n--- Log streaming completed ---\n";
+    });
+
+    // Trigger Jenkins build
+    triggerBuild.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/trigger-build", { method: "POST" });
+        const data = await res.json();
+        alert(data.message || "Build triggered!");
+      } catch (err) {
+        alert("Error triggering build.");
+      }
+    });
+
+    // Load build history
+    async function fetchBuildHistory() {
+      try {
+        const res = await fetch("/build-history");
+        const { builds } = await res.json();
+        buildBody.innerHTML = "";
+        builds.forEach(b => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td class="log-link" data-number="${b.number}">#${b.number}</td>
+            <td>${b.result || "Running..."}</td>
+            <td>${(b.duration / 1000).toFixed(1)}s</td>
+            <td>${new Date(b.timestamp).toLocaleString()}</td>
+          `;
+          buildBody.appendChild(tr);
+        });
+      } catch (err) {
+        buildBody.innerHTML = `<tr><td colspan="4">Failed to load history</td></tr>`;
+      }
+    }
+
+    // Watch build logs
+    buildBody.addEventListener("click", e => {
+      const td = e.target.closest(".log-link");
+      if (td) {
+        const buildNumber = td.dataset.number;
+        logContent.textContent = `Streaming log for build #${buildNumber}...\n\n`;
+        logModal.style.display = "block";
+        socket.emit("watch-log", buildNumber);
+      }
+    });
+
+    logClose.addEventListener("click", () => {
+      logModal.style.display = "none";
+      logContent.textContent = "";
+    });
+
+    fetchBuildHistory();
+  </script>
+</body>
+</html>

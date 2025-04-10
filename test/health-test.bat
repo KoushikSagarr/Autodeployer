@@ -1,7 +1,7 @@
 @echo off
 echo Sending request to /health...
 
-curl --silent http://localhost:3000/health > response.txt
+curl --silent http://localhost:5000/health > response.txt
 
 findstr /C:"\"status\":\"ok\"" response.txt > nul
 
