@@ -25,7 +25,7 @@ pipeline {
                     FOR /F "tokens=5" %%a IN ('netstat -ano ^| findstr :3001') DO taskkill /F /PID %%a
 
                     REM Start the app on port 3001 in the background
-                    start /b cmd /c "set PORT=3001 && node app\\index.js"
+                    start /b cmd /c "set PORT=3001 && node index.js"
 
                     REM Wait a few seconds for the app to boot up
                     ping 127.0.0.1 -n 5 >nul
