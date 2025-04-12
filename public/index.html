@@ -6,6 +6,7 @@
   <title>Auto Deployer Dashboard</title>
   <link rel="stylesheet" href="/styles.css"/>
   <style>
+    /* Inline styles for the log modal if not using a separate file */
     #logModal {
       display: none;
       position: fixed;
@@ -37,14 +38,17 @@
 <body>
   <div class="container">
     <h1>🚀 Auto Deployment Dashboard</h1>
-
-    <button id="triggerBuild">Trigger Jenkins Build</button>
-
+    
+    <!-- Trigger Jenkins Build -->
+    <button id="triggerBuild">Trigger Build</button>
+    
+    <!-- Real-time Status Updates -->
     <section class="status-section">
       <h2>Status Updates</h2>
       <ul id="statusList"></ul>
     </section>
-
+    
+    <!-- Build History -->
     <section class="history-section">
       <h2>Build History (Click to view logs)</h2>
       <table id="buildTable">
@@ -63,41 +67,46 @@
     </section>
   </div>
 
-  <!-- Live log viewer -->
+  <!-- Live log viewer modal -->
   <div id="logModal">
     <button id="logClose">Close</button>
     <pre id="logContent">Loading log...</pre>
   </div>
 
+  <!-- Socket.IO CDN -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
+    // Use default connection; assumes frontend is served from same origin as backend.
     const socket = io();
+    
+    // DOM elements
     const triggerBuild = document.getElementById("triggerBuild");
     const statusList = document.getElementById("statusList");
     const buildBody = document.getElementById("buildBody");
     const logModal = document.getElementById("logModal");
     const logContent = document.getElementById("logContent");
     const logClose = document.getElementById("logClose");
-
-    // Live status messages
+    
+    // Listen for real-time status messages and update the status list
     socket.on("status", ({ type, message, time }) => {
       const li = document.createElement("li");
       li.textContent = `[${new Date(time).toLocaleTimeString()}] ${type.toUpperCase()}: ${message}`;
       li.className = type;
       statusList.prepend(li);
     });
-
-    // Live build log updates
+    
+    // Listen for live log updates
     socket.on("log-update", log => {
       logContent.textContent += log;
       logContent.scrollTop = logContent.scrollHeight;
     });
-
+    
+    // When log streaming is done
     socket.on("log-done", () => {
       logContent.textContent += "\n--- Log streaming completed ---\n";
     });
-
-    // Trigger Jenkins build
+    
+    // Trigger build on button click
     triggerBuild.addEventListener("click", async () => {
       try {
         const res = await fetch("/trigger-build", { method: "POST" });
@@ -107,8 +116,8 @@
         alert("Error triggering build.");
       }
     });
-
-    // Load build history
+    
+    // Fetch build history
     async function fetchBuildHistory() {
       try {
         const res = await fetch("/build-history");
@@ -128,8 +137,8 @@
         buildBody.innerHTML = `<tr><td colspan="4">Failed to load history</td></tr>`;
       }
     }
-
-    // Watch build logs
+    
+    // Allow clicking a row to view its logs
     buildBody.addEventListener("click", e => {
       const td = e.target.closest(".log-link");
       if (td) {
@@ -139,12 +148,14 @@
         socket.emit("watch-log", buildNumber);
       }
     });
-
+    
+    // Close the log modal
     logClose.addEventListener("click", () => {
       logModal.style.display = "none";
       logContent.textContent = "";
     });
-
+    
+    // Initial fetch of build history
     fetchBuildHistory();
   </script>
 </body>
